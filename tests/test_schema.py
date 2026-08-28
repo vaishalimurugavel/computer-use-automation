@@ -12,6 +12,7 @@ These tests focus on the design decisions we reasoned through explicitly:
 import pytest
 from pydantic import ValidationError
 
+
 from capability_recorder.schema import (
     ActionType,
     BusinessOutcomeType,

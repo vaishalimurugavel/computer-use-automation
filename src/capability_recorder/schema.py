@@ -11,7 +11,6 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 from typing import Optional
-
 from pydantic import BaseModel, Field
 
 
@@ -160,17 +159,17 @@ class Capability(BaseModel):
     target_app: str  # e.g. "saucedemo" -- relevant for future multi-tenant reuse
     description: str
 
-    input_params: list[InputParam] = []
-    output_fields: list[OutputField] = []
+    input_params: list[InputParam] =  Field(default_factory=list)
+    output_fields: list[OutputField] = Field(default_factory=list)
     steps: list[Step]
     success_condition: SuccessCondition
 
-    expected_business_outcomes: list[ExpectedBusinessOutcome] = []
-    local_recovery_rules: list[RecoveryRule] = []
+    expected_business_outcomes: list[ExpectedBusinessOutcome] = Field(default_factory=list)
+    local_recovery_rules: list[RecoveryRule] = Field(default_factory=list)
     # Global recovery rules (session timeouts, generic cookie banners, etc.)
     # live OUTSIDE any single artifact -- see recovery.py -- since they are
     # properties of the target application, not of any one recorded task.
 
-    revision_history: list[RevisionMetadata] = []
+    revision_history: list[RevisionMetadata] = Field(default_factory=list)
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
