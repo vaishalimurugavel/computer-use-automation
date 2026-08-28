@@ -1,0 +1,10 @@
+LICENSE
+README.md
+pyproject.toml
+src/capability_recorder/__init__.py
+src/capability_recorder/schema.py
+src/capability_recorder.egg-info/PKG-INFO
+src/capability_recorder.egg-info/SOURCES.txt
+src/capability_recorder.egg-info/dependency_links.txt
+src/capability_recorder.egg-info/top_level.txt
+tests/test_schema.py
