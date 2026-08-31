@@ -3,13 +3,23 @@ Perception: turns "what's currently on screen" into a structured,
 LLM-consumable Observation.
 
 Design choice: the core logic (flatten_accessibility_tree) is a PURE
-function operating on a plain dict -- the same shape Playwright's
-page.accessibility.snapshot() returns -- rather than depending on a live
-Playwright Page object directly. This means the indexing/flattening logic
-can be tested with fast, fake fixtures with no browser dependency at all.
-Only capture_observation() (a thin wrapper) actually touches Playwright,
-and it is exercised via real runs against SauceDemo/Demoblaze rather than
-unit tests, since it requires a live page.
+function operating on plain text -- the YAML-style string Playwright's
+page.locator(...).aria_snapshot() returns -- rather than depending on a
+live Playwright Page object directly. This means the indexing/flattening
+logic can be tested with fast, fake fixtures with no browser dependency
+at all. Only capture_observation() (a thin wrapper) actually touches
+Playwright, and it is exercised via real runs against SauceDemo/Demoblaze
+rather than unit tests, since it requires a live page.
+
+NOTE ON API HISTORY: this module was originally written against
+page.accessibility.snapshot(), which returned a nested dict. That API has
+since been removed from Playwright; aria_snapshot() (confirmed present in
+1.62.0, the version used in this project) is the current replacement, and
+returns YAML-style text instead. This was caught via a live manual test
+against SauceDemo, not by the automated test suite, since the original
+tests used fake dicts that encoded the old (now-incorrect) assumption
+about the API's shape -- a good example of why live verification against
+a real target matters even with a passing unit test suite.
 
 Text-only for now (no screenshots) -- see README/REPORT for why this is a
 reasonable v1 choice given SauceDemo/Demoblaze have decent accessibility
@@ -19,14 +29,17 @@ messier/legacy targets.
 
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel
 
 from capability_recorder.schema import Locator, LocatorStrategy
 
 # Roles worth surfacing to the agent as candidate actions. Deliberately a
-# fixed, curated set rather than "every node in the tree" -- most
+# fixed, curated set rather than "every line in the snapshot" -- most
 # accessibility trees contain many non-interactive structural nodes
-# (headings, generic containers) that would only add noise for the LLM.
+# (headings, generic containers, plain text) that would only add noise
+# for the LLM.
 INTERACTIVE_ROLES = {
     "button",
     "link",
@@ -53,29 +66,31 @@ class Observation(BaseModel):
     elements: list[ObservedElement]
 
 
-def flatten_accessibility_tree(snapshot: dict) -> list[ObservedElement]:
-    """Walk a raw accessibility-tree snapshot dict and produce a flat,
-    indexed list of interactive elements only.
+_LINE_PATTERN = re.compile(
+    r'^\s*-\s*([a-zA-Z]+)(?:\s+"([^"]*)")?'
+)
 
-    `snapshot` has the shape Playwright's page.accessibility.snapshot()
-    returns: {"role": str, "name": str, "children": [...]} (recursively).
-    Kept as a plain dict parameter (not a Playwright type) specifically so
-    this function has zero Playwright dependency and can be unit tested
-    with fake fixtures.
+
+def flatten_accessibility_tree(snapshot_text: str) -> list[ObservedElement]:
+    """Parse the YAML-style text Playwright's page.locator(...).aria_snapshot()
+    returns, producing a flat, indexed list of interactive elements only.
+
+    Each line of aria_snapshot() output looks like:
+        - button "Login"
+        - textbox "Username"
+        - heading "Accepted usernames are:" [level=4]
+    Indentation conveys nesting, but for our purposes we only need a flat
+    list of interactive elements in document order, so indentation is
+    intentionally ignored.
     """
     elements: list[ObservedElement] = []
-    _walk(snapshot, elements)
-    return elements
-
-
-def _walk(node: dict, elements: list[ObservedElement]) -> None:
-    if not node:
-        return
-
-    role = node.get("role", "")
-    name = node.get("name", "") or ""
-
-    if role in INTERACTIVE_ROLES:
+    for line in snapshot_text.splitlines():
+        match = _LINE_PATTERN.match(line)
+        if not match:
+            continue
+        role, name = match.group(1), match.group(2) or ""
+        if role not in INTERACTIVE_ROLES:
+            continue
         index = len(elements) + 1
         elements.append(
             ObservedElement(
@@ -85,9 +100,7 @@ def _walk(node: dict, elements: list[ObservedElement]) -> None:
                 locators=_build_locators(role, name),
             )
         )
-
-    for child in node.get("children", []) or []:
-        _walk(child, elements)
+    return elements
 
 
 def _build_locators(role: str, name: str) -> list[Locator]:
@@ -123,8 +136,8 @@ def capture_observation(page) -> Observation:
     dependency on playwright for anything that only needs
     flatten_accessibility_tree.
     """
-    snapshot = page.accessibility.snapshot() or {}
-    elements = flatten_accessibility_tree(snapshot)
+    snapshot_text = page.locator("body").aria_snapshot()
+    elements = flatten_accessibility_tree(snapshot_text)
     return Observation(
         url=page.url,
         page_text=page.inner_text("body"),
