@@ -97,17 +97,23 @@ def parse_llm_response(raw_text: str) -> AgentDecision:
         raise LLMResponseParseError(f"Model response JSON did not match expected shape: {data!r}") from e
 
 
-def call_gemini(prompt: str, api_key: str, model: str = "gemini-1.5-flash") -> str:
+def call_gemini(prompt: str, api_key: str, model: str = "gemini-3.6-flash") -> str:
     """Thin wrapper around the actual Gemini API call. Not unit tested --
     requires network access and a real API key. Kept as a single-purpose
     function (prompt in, raw text out) so it's trivially swappable for a
     different provider without touching build_prompt/parse_llm_response.
-    """
-    import google.generativeai as genai  # local import: only required if this function is actually called
 
-    genai.configure(api_key=api_key)
-    gemini_model = genai.GenerativeModel(model)
-    response = gemini_model.generate_content(prompt)
+    NOTE ON SDK HISTORY: originally written against the `google-generativeai`
+    package, which Google has since fully deprecated in favor of the unified
+    `google-genai` SDK (confirmed via a live run: the old package emitted a
+    FutureWarning stating all support had ended, and the old model name
+    'gemini-1.5-flash' returned a 404 NotFound against the current API).
+    Migrated to `google-genai` accordingly.
+    """
+    from google import genai  # local import: only required if this function is actually called
+
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(model=model, contents=prompt)
     return response.text
 
 
