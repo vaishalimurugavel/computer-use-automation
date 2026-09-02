@@ -1,0 +1,82 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Architecture" id="architecture-diagram">
+    <mxGraphModel dx="1688" dy="704" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1100" pageHeight="850" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="hdr1" parent="1" style="text;html=1;fontSize=16;fontStyle=1;align=center;" value="DISCOVERY TIME" vertex="1">
+          <mxGeometry height="30" width="240" x="80" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="hdr2" parent="1" style="text;html=1;fontSize=16;fontStyle=1;align=center;" value="REPLAY TIME" vertex="1">
+          <mxGeometry height="30" width="240" x="744" y="28" as="geometry" />
+        </mxCell>
+        <mxCell id="agent" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" value="agent.py&#xa;(LLM-driven)" vertex="1">
+          <mxGeometry height="70" width="180" x="74" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="perception" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" value="perception.py&#xa;(accessibility tree -&gt; Observation)" vertex="1">
+          <mxGeometry height="70" width="220" x="-93" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="llm" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" value="llm_client.py&#xa;(Gemini API)" vertex="1">
+          <mxGeometry height="60" width="220" x="187" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="capability" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;fontStyle=1;" value="Capability&#xa;(schema.py)&#xa;the artifact" vertex="1">
+          <mxGeometry height="80" width="200" x="440" y="115" as="geometry" />
+        </mxCell>
+        <mxCell id="replay" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" value="replay.py&#xa;(LLM-free)" vertex="1">
+          <mxGeometry height="70" width="180" x="778" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="executor" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;dashed=1;" value="StepExecutor&#xa;(Protocol -- the seam)" vertex="1">
+          <mxGeometry height="60" width="220" x="758" y="230" as="geometry" />
+        </mxCell>
+        <mxCell id="fake" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" value="FakeStepExecutor&#xa;(tests)" vertex="1">
+          <mxGeometry height="55" width="160" x="693" y="409" as="geometry" />
+        </mxCell>
+        <mxCell id="pw" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="PlaywrightStepExecutor&#xa;(live browser)" vertex="1">
+          <mxGeometry height="55" width="180" x="869" y="409" as="geometry" />
+        </mxCell>
+        <mxCell id="recovery" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" value="recovery.py&#xa;global rules (app-wide)&#xa;+ local rules (per-artifact)" vertex="1">
+          <mxGeometry height="70" width="220" x="952" y="541" as="geometry" />
+        </mxCell>
+        <mxCell id="xHkHZ5rRrATZcPLe_xov-1" edge="1" parent="1" source="escalation" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="replay" value="escalates">
+          <mxGeometry relative="1" x="-0.349" y="-6" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1181" y="143" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="escalation" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;" value="EscalationHandler&#xa;(risky steps + hard failures)" vertex="1">
+          <mxGeometry height="60" width="220" x="1080" y="400" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="perception" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="agent">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="llm" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="agent">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="agent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=11;" target="capability" value="produces">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="capability" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=11;" target="replay" value="consumes">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="replay" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="executor">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="fake" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;fontSize=10;" target="executor" value="implements">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="pw" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;fontSize=10;" target="executor" value="implements">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="recovery" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" target="replay" value="recovery lookup">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1063" y="154" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
