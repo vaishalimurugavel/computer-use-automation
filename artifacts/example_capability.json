@@ -1,0 +1,114 @@
+{
+  "capability_id": "cap-001",
+  "name": "login_add_backpack_view_cart",
+  "version": 1,
+  "target_app": "saucedemo",
+  "description": "Log in with username 'standard_user' and password 'secret_sauce', add the Sauce Labs Backpack to the cart, then go to the cart page.",
+  "input_params": [],
+  "output_fields": [],
+  "steps": [
+    {
+      "step_id": 1,
+      "action": "type",
+      "target": {
+        "locators": [
+          {
+            "strategy": "accessibility_role",
+            "value": "role:textbox;name:Username",
+            "confidence": 0.9,
+            "reasoning": null
+          }
+        ],
+        "description": "textbox \"Username\""
+      },
+      "value": "standard_user",
+      "extract_as": null,
+      "risk_level": "safe",
+      "dynamic_risk_check": null
+    },
+    {
+      "step_id": 2,
+      "action": "type",
+      "target": {
+        "locators": [
+          {
+            "strategy": "accessibility_role",
+            "value": "role:textbox;name:Password",
+            "confidence": 0.9,
+            "reasoning": null
+          }
+        ],
+        "description": "textbox \"Password\""
+      },
+      "value": "secret_sauce",
+      "extract_as": null,
+      "risk_level": "safe",
+      "dynamic_risk_check": null
+    },
+    {
+      "step_id": 3,
+      "action": "click",
+      "target": {
+        "locators": [
+          {
+            "strategy": "accessibility_role",
+            "value": "role:button;name:Login",
+            "confidence": 0.9,
+            "reasoning": null
+          }
+        ],
+        "description": "button \"Login\""
+      },
+      "value": null,
+      "extract_as": null,
+      "risk_level": "safe",
+      "dynamic_risk_check": null
+    },
+    {
+      "step_id": 4,
+      "action": "click",
+      "target": {
+        "locators": [
+          {
+            "strategy": "accessibility_role",
+            "value": "role:button;name:Add to cart",
+            "confidence": 0.9,
+            "reasoning": null
+          }
+        ],
+        "description": "button \"Add to cart\""
+      },
+      "value": null,
+      "extract_as": null,
+      "risk_level": "safe",
+      "dynamic_risk_check": null
+    },
+    {
+      "step_id": 5,
+      "action": "navigate",
+      "target": null,
+      "value": "https://www.saucedemo.com/cart.html",
+      "extract_as": null,
+      "risk_level": "safe",
+      "dynamic_risk_check": null
+    }
+  ],
+  "success_condition": {
+    "description": "Page contains: 'Your Cart'",
+    "check": {
+      "locators": [
+        {
+          "strategy": "text_content",
+          "value": "Your Cart",
+          "confidence": 0.7,
+          "reasoning": "Auto-generated from success_check_text; not independently verified against the live page at recording time -- see REPORT.md Cuts."
+        }
+      ],
+      "description": "Success indicator"
+    }
+  },
+  "expected_business_outcomes": [],
+  "local_recovery_rules": [],
+  "revision_history": [],
+  "created_at": "2026-09-02T21:09:18.204315"
+}
