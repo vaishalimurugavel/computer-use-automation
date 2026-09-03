@@ -7,6 +7,8 @@ the decision-making logic: risk gating, outcome classification, and
 control flow for each of the four outcome categories.
 """
 
+import pytest
+
 from capability_recorder.replay import (
     ExecutionResult,
     OutcomeCategory,
@@ -217,3 +219,50 @@ def test_hard_failure_resolved_by_human_allows_replay_to_continue():
 
     assert result.final_category == OutcomeCategory.SUCCESS
     assert len(result.step_outcomes) == 2
+
+
+# ---------------------------------------------------------------------------
+# Redacted-parameter substitution at replay time
+# ---------------------------------------------------------------------------
+
+def test_placeholder_value_is_substituted_with_supplied_input_value():
+    cap = _capability([
+        Step(step_id=1, action=ActionType.TYPE, value="{{password}}"),
+    ])
+    executor = FakeStepExecutor({
+        1: ExecutionResult(succeeded=True, observed_state="typed"),
+    })
+    escalation = FakeEscalationHandler()
+
+    result = replay_capability(cap, executor, escalation, input_values={"password": "real_secret"})
+
+    assert result.final_category == OutcomeCategory.SUCCESS
+
+
+def test_missing_input_value_for_placeholder_raises_rather_than_using_blank():
+    from capability_recorder.replay import MissingInputValueError
+
+    cap = _capability([
+        Step(step_id=1, action=ActionType.TYPE, value="{{password}}"),
+    ])
+    executor = FakeStepExecutor({
+        1: ExecutionResult(succeeded=True, observed_state="typed"),
+    })
+    escalation = FakeEscalationHandler()
+
+    with pytest.raises(MissingInputValueError):
+        replay_capability(cap, executor, escalation, input_values={})
+
+
+def test_non_placeholder_values_are_passed_through_unchanged():
+    cap = _capability([
+        Step(step_id=1, action=ActionType.TYPE, value="standard_user"),
+    ])
+    executor = FakeStepExecutor({
+        1: ExecutionResult(succeeded=True, observed_state="typed"),
+    })
+    escalation = FakeEscalationHandler()
+
+    result = replay_capability(cap, executor, escalation, input_values={})
+
+    assert result.final_category == OutcomeCategory.SUCCESS

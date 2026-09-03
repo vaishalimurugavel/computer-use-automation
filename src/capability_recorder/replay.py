@@ -16,6 +16,8 @@ everything in this file works against the abstract StepExecutor interface.
 
 from __future__ import annotations
 
+import re
+
 from enum import Enum
 from typing import Optional, Protocol
 
@@ -106,14 +108,52 @@ class EscalationHandler(Protocol):
 # The replay engine itself
 # ---------------------------------------------------------------------------
 
+_PLACEHOLDER_PATTERN = re.compile(r"^\{\{(\w+)\}\}$")
+
+
+class MissingInputValueError(Exception):
+    """Raised when a step references a redacted parameter (e.g.
+    '{{password}}') but no value was supplied for it. Never falls back to
+    a blank or guessed value -- consistent with the project-wide 'never
+    silently guess' principle."""
+
+
+def _resolve_step_value(step: Step, input_values: dict[str, str]) -> Step:
+    """If step.value is a placeholder like '{{password}}' (see
+    agent.py::decision_to_step, which redacts sensitive field values into
+    such placeholders at recording time), substitute the real value
+    supplied for this replay. Otherwise return the step unchanged.
+
+    This is what lets a Capability artifact be safely persisted without
+    ever containing a real secret, while still being replayable: the real
+    value is supplied fresh, per invocation, and never written to disk.
+    """
+    if step.value is None:
+        return step
+    match = _PLACEHOLDER_PATTERN.match(step.value)
+    if not match:
+        return step
+    param_name = match.group(1)
+    if param_name not in input_values:
+        raise MissingInputValueError(
+            f"Step {step.step_id} requires input parameter {param_name!r}, "
+            f"which was not supplied in input_values."
+        )
+    return step.model_copy(update={"value": input_values[param_name]})
+
+
 def replay_capability(
     capability: Capability,
     executor: StepExecutor,
     escalation_handler: EscalationHandler,
+    input_values: dict[str, str] | None = None,
 ) -> ReplayResult:
+    input_values = input_values or {}
     step_outcomes: list[StepOutcome] = []
 
     for step in capability.steps:
+        step = _resolve_step_value(step, input_values)
+
         # 1. Risk gating -- checked BEFORE execution, independent of success/failure.
         if step.risk_level == RiskLevel.RISKY:
             approved = escalation_handler.escalate(step, reason="risky action requires confirmation")

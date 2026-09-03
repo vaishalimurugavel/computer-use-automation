@@ -52,30 +52,33 @@ def test_parses_name_with_special_characters():
 
 def test_click_decision_becomes_click_step_with_correct_target():
     decision = AgentDecision(reasoning="add to cart", action="click", target_index=1, done=False)
-    step = decision_to_step(decision, _observation(), step_id=5)
+    step, param = decision_to_step(decision, _observation(), step_id=5)
 
     assert step.step_id == 5
     assert step.action == "click"
     assert step.target is not None
     assert step.target.locators[0].value == "role:button;name:Add to cart"
+    assert param is None
 
 
 def test_type_decision_carries_the_value_to_type():
     decision = AgentDecision(reasoning="enter username", action="type", target_index=2, value="standard_user", done=False)
-    step = decision_to_step(decision, _observation(), step_id=1)
+    step, param = decision_to_step(decision, _observation(), step_id=1)
 
     assert step.action == "type"
     assert step.value == "standard_user"
     assert step.target.locators[0].value == "role:textbox"
+    assert param is None
 
 
 def test_navigate_decision_has_no_target():
     decision = AgentDecision(reasoning="go to login", action="navigate", value="https://www.saucedemo.com/", done=False)
-    step = decision_to_step(decision, _observation(), step_id=1)
+    step, param = decision_to_step(decision, _observation(), step_id=1)
 
     assert step.action == "navigate"
     assert step.target is None
     assert step.value == "https://www.saucedemo.com/"
+    assert param is None
 
 
 def test_invalid_target_index_raises_rather_than_silently_picking_something():
@@ -92,7 +95,57 @@ def test_unrecognized_action_raises_rather_than_being_silently_ignored():
 
 def test_recorded_step_defaults_to_safe_risk_level():
     decision = AgentDecision(reasoning="click", action="click", target_index=1, done=False)
-    step = decision_to_step(decision, _observation(), step_id=1)
+    step, _ = decision_to_step(decision, _observation(), step_id=1)
 
     from capability_recorder.schema import RiskLevel
     assert step.risk_level == RiskLevel.SAFE
+
+
+def _observation_with_password_field() -> Observation:
+    return Observation(
+        url="https://www.saucedemo.com/",
+        page_text="Login",
+        elements=[
+            ObservedElement(
+                index=1, role="textbox", name="Password",
+                locators=[Locator(strategy=LocatorStrategy.ACCESSIBILITY_ROLE, value="role:textbox;name:Password", confidence=0.9)],
+            ),
+        ],
+    )
+
+
+def test_is_sensitive_field_detects_common_keywords():
+    from capability_recorder.agent import is_sensitive_field
+    assert is_sensitive_field("Password") is True
+    assert is_sensitive_field("password") is True
+    assert is_sensitive_field("Social Security Number (SSN)") is True
+    assert is_sensitive_field("PIN") is True
+    assert is_sensitive_field("Username") is False
+    assert is_sensitive_field("Search") is False
+
+
+def test_typing_into_a_sensitive_field_redacts_the_literal_value():
+    decision = AgentDecision(reasoning="enter password", action="type", target_index=1, value="secret_sauce", done=False)
+    step, param = decision_to_step(decision, _observation_with_password_field(), step_id=1)
+
+    assert step.value != "secret_sauce"
+    assert "secret_sauce" not in (step.value or "")
+    assert step.value == "{{password}}"
+
+
+def test_typing_into_a_sensitive_field_produces_a_matching_input_param():
+    decision = AgentDecision(reasoning="enter password", action="type", target_index=1, value="secret_sauce", done=False)
+    step, param = decision_to_step(decision, _observation_with_password_field(), step_id=1)
+
+    assert param is not None
+    assert param.name == "password"
+    assert param.required is True
+    assert "secret_sauce" not in param.description
+
+
+def test_typing_into_a_non_sensitive_field_is_not_redacted():
+    decision = AgentDecision(reasoning="enter username", action="type", target_index=2, value="standard_user", done=False)
+    step, param = decision_to_step(decision, _observation(), step_id=1)
+
+    assert step.value == "standard_user"
+    assert param is None

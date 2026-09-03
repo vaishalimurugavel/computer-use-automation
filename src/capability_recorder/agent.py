@@ -14,6 +14,8 @@ and a real LLM call.
 
 from __future__ import annotations
 
+import re
+
 from capability_recorder.llm_client import AgentDecision, get_next_action
 from capability_recorder.perception import Observation, capture_observation
 from capability_recorder.schema import (
@@ -27,6 +29,26 @@ from capability_recorder.schema import (
     Step,
     SuccessCondition,
 )
+
+# Field-name keywords that trigger redaction-via-parameterization. This is
+# a deliberately simple heuristic (matched case-insensitively against the
+# element's accessible name) -- not a complete PII/secrets classifier, but
+# enough to catch the common cases (password, SSN, PIN, credential, token,
+# CVV) and demonstrate the mechanism. See REPORT.md "Cuts" for what a more
+# complete classifier would need.
+SENSITIVE_FIELD_KEYWORDS = ("password", "ssn", "pin", "secret", "token", "credential", "cvv")
+
+
+def is_sensitive_field(element_name: str) -> bool:
+    lowered = element_name.lower()
+    return any(keyword in lowered for keyword in SENSITIVE_FIELD_KEYWORDS)
+
+
+def _param_name_from_element(element_name: str) -> str:
+    """Turn an accessible name like 'Password' or 'Social Security Number'
+    into a param_name like 'password' or 'social_security_number'."""
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", element_name.strip().lower())
+    return slug.strip("_") or "value"
 
 
 class GoalNotReachedError(Exception):
@@ -55,10 +77,20 @@ def parse_locator_value(value: str) -> tuple[str, str | None]:
     return role, name
 
 
-def decision_to_step(decision: AgentDecision, observation: Observation, step_id: int) -> Step:
+def decision_to_step(
+    decision: AgentDecision, observation: Observation, step_id: int
+) -> tuple[Step, InputParam | None]:
     """Turn one AgentDecision (the LLM's chosen action) into a recorded
     Step, using the ObservedElement it pointed to (if any) for the
     ElementTarget/Locators. Pure function -- no Playwright dependency.
+
+    Returns (step, input_param). input_param is non-None when the target
+    field was detected as sensitive (see SENSITIVE_FIELD_KEYWORDS): in
+    that case, step.value is a placeholder reference like "{{password}}"
+    rather than the literal typed value -- the literal value is never
+    written into the returned Step, and therefore never persisted into a
+    saved Capability artifact. The real value must be supplied fresh at
+    replay time via replay_capability's input_values argument.
     """
     action_map = {
         "click": "click",
@@ -70,6 +102,9 @@ def decision_to_step(decision: AgentDecision, observation: Observation, step_id:
         raise ValueError(f"Unrecognized action from LLM decision: {decision.action!r}")
 
     target: ElementTarget | None = None
+    input_param: InputParam | None = None
+    value = decision.value
+
     if decision.target_index is not None:
         matching = [el for el in observation.elements if el.index == decision.target_index]
         if not matching:
@@ -83,13 +118,24 @@ def decision_to_step(decision: AgentDecision, observation: Observation, step_id:
             locators=element.locators,
         )
 
-    return Step(
+        if decision.action == "type" and element.name and is_sensitive_field(element.name):
+            param_name = _param_name_from_element(element.name)
+            value = f"{{{{{param_name}}}}}"  # e.g. "{{password}}"
+            input_param = InputParam(
+                name=param_name,
+                type="string",
+                required=True,
+                description=f"Value for {element.name} (redacted at recording time -- supply at replay time).",
+            )
+
+    step = Step(
         step_id=step_id,
         action=action_map[decision.action],
         target=target,
-        value=decision.value,
+        value=value,
         risk_level=RiskLevel.SAFE,  # static risk classification is a documented next step -- see REPORT.md
     )
+    return step, input_param
 
 
 def _execute_on_page(page, step: Step) -> None:
@@ -135,6 +181,7 @@ def _execute_on_page(page, step: Step) -> None:
     elif step.action == "extract":
         element.text_content()  # discovery-time only; not yet wired into an output field -- see REPORT.md
 
+
 def discover_capability(
     page,
     goal: str,
@@ -156,6 +203,8 @@ def discover_capability(
     rather than something this MVP attempts -- see REPORT.md "Cuts".
     """
     steps: list[Step] = []
+    input_params: list[InputParam] = []
+    seen_param_names: set[str] = set()
     history: list[AgentDecision] = []
 
     for iteration in range(1, max_iterations + 1):
@@ -166,9 +215,12 @@ def discover_capability(
         if decision.done:
             break
 
-        step = decision_to_step(decision, observation, step_id=iteration)
+        step, input_param = decision_to_step(decision, observation, step_id=iteration)
         _execute_on_page(page, step)
         steps.append(step)
+        if input_param is not None and input_param.name not in seen_param_names:
+            input_params.append(input_param)
+            seen_param_names.add(input_param.name)
     else:
         raise GoalNotReachedError(
             f"Goal not reached after {max_iterations} iterations: {goal!r}"
@@ -180,7 +232,7 @@ def discover_capability(
         version=1,
         target_app=target_app,
         description=goal,
-        input_params=[],
+        input_params=input_params,
         output_fields=[],
         steps=steps,
         success_condition=SuccessCondition(
