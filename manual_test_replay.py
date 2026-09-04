@@ -7,7 +7,7 @@ deterministically forever" claim, demonstrated end-to-end.
 Run with:
     python manual_test_replay.py
 
-Expects artifacts/example_capability.json to exist (save the JSON printed
+Expects evidence/example_capability.json to exist (save the JSON printed
 by manual_test_discovery.py there first).
 """
 
@@ -30,7 +30,7 @@ class AutoApproveEscalationHandler:
 
 
 def main():
-    with open("artifacts/example_capability.json") as f:
+    with open("evidence/example_capability.json") as f:
         capability = Capability.model_validate(json.load(f))
 
     print(f"Replaying capability: {capability.name} ({len(capability.steps)} steps)\n")

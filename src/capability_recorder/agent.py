@@ -79,18 +79,28 @@ def parse_locator_value(value: str) -> tuple[str, str | None]:
 
 def decision_to_step(
     decision: AgentDecision, observation: Observation, step_id: int
-) -> tuple[Step, InputParam | None]:
-    """Turn one AgentDecision (the LLM's chosen action) into a recorded
-    Step, using the ObservedElement it pointed to (if any) for the
-    ElementTarget/Locators. Pure function -- no Playwright dependency.
+) -> tuple[Step, Step, InputParam | None]:
+    """Turn one AgentDecision (the LLM's chosen action) into TWO Steps and
+    an optional InputParam. Pure function -- no Playwright dependency.
 
-    Returns (step, input_param). input_param is non-None when the target
-    field was detected as sensitive (see SENSITIVE_FIELD_KEYWORDS): in
-    that case, step.value is a placeholder reference like "{{password}}"
-    rather than the literal typed value -- the literal value is never
-    written into the returned Step, and therefore never persisted into a
-    saved Capability artifact. The real value must be supplied fresh at
-    replay time via replay_capability's input_values argument.
+    Returns (execution_step, artifact_step, input_param):
+    - execution_step carries the REAL value (e.g. the actual typed
+      password) and must be used to actually drive the page during
+      discovery -- see _execute_on_page / discover_capability.
+    - artifact_step carries a redacted placeholder (e.g. "{{password}}")
+      in place of any sensitive value, and is what gets stored in the
+      final Capability. The literal secret is never written into
+      artifact_step, and therefore never persisted to disk.
+
+    Bug history: an earlier version returned only one Step, already
+    redacted, and discover_capability used it for BOTH execution and
+    storage -- which meant discovery literally typed the placeholder
+    string "{{password}}" into the page instead of the real password,
+    causing login (and therefore the whole goal) to fail every time.
+    Caught via a live run that hit GoalNotReachedError after max
+    iterations, not by the unit test suite, since the tests only checked
+    artifact_step's redaction, never that execution_step still carried
+    the real value.
     """
     action_map = {
         "click": "click",
@@ -103,7 +113,8 @@ def decision_to_step(
 
     target: ElementTarget | None = None
     input_param: InputParam | None = None
-    value = decision.value
+    real_value = decision.value
+    artifact_value = decision.value
 
     if decision.target_index is not None:
         matching = [el for el in observation.elements if el.index == decision.target_index]
@@ -120,7 +131,7 @@ def decision_to_step(
 
         if decision.action == "type" and element.name and is_sensitive_field(element.name):
             param_name = _param_name_from_element(element.name)
-            value = f"{{{{{param_name}}}}}"  # e.g. "{{password}}"
+            artifact_value = f"{{{{{param_name}}}}}"  # e.g. "{{password}}" -- NOT used for execution
             input_param = InputParam(
                 name=param_name,
                 type="string",
@@ -128,14 +139,21 @@ def decision_to_step(
                 description=f"Value for {element.name} (redacted at recording time -- supply at replay time).",
             )
 
-    step = Step(
+    execution_step = Step(
         step_id=step_id,
         action=action_map[decision.action],
         target=target,
-        value=value,
-        risk_level=RiskLevel.SAFE,  # static risk classification is a documented next step -- see REPORT.md
+        value=real_value,  # the real value -- this is what actually gets typed
+        risk_level=RiskLevel.SAFE,
     )
-    return step, input_param
+    artifact_step = Step(
+        step_id=step_id,
+        action=action_map[decision.action],
+        target=target,
+        value=artifact_value,  # redacted placeholder if sensitive -- this is what gets saved
+        risk_level=RiskLevel.SAFE,
+    )
+    return execution_step, artifact_step, input_param
 
 
 def _execute_on_page(page, step: Step) -> None:
@@ -215,9 +233,9 @@ def discover_capability(
         if decision.done:
             break
 
-        step, input_param = decision_to_step(decision, observation, step_id=iteration)
-        _execute_on_page(page, step)
-        steps.append(step)
+        execution_step, artifact_step, input_param = decision_to_step(decision, observation, step_id=iteration)
+        _execute_on_page(page, execution_step)  # real value -- actually types the real password
+        steps.append(artifact_step)             # redacted value -- this is what gets persisted
         if input_param is not None and input_param.name not in seen_param_names:
             input_params.append(input_param)
             seen_param_names.add(input_param.name)

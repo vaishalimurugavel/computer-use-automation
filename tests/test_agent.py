@@ -3,8 +3,10 @@ Tests for agent.py's pure logic: parse_locator_value and decision_to_step.
 
 discover_capability() and _execute_on_page() are NOT tested here -- they
 require a live Playwright page and a real LLM call. These tests cover
-the translation logic between an LLM's decision and a recorded Step,
-which is where real bugs (wrong index, malformed locator) would surface.
+the translation logic between an LLM's decision and recorded/execution
+steps, which is where real bugs (wrong index, malformed locator, and --
+found via a live run -- executing the REDACTED value instead of the
+real one) would surface.
 """
 
 import pytest
@@ -52,32 +54,33 @@ def test_parses_name_with_special_characters():
 
 def test_click_decision_becomes_click_step_with_correct_target():
     decision = AgentDecision(reasoning="add to cart", action="click", target_index=1, done=False)
-    step, param = decision_to_step(decision, _observation(), step_id=5)
+    execution_step, artifact_step, param = decision_to_step(decision, _observation(), step_id=5)
 
-    assert step.step_id == 5
-    assert step.action == "click"
-    assert step.target is not None
-    assert step.target.locators[0].value == "role:button;name:Add to cart"
+    assert execution_step.step_id == 5
+    assert execution_step.action == "click"
+    assert execution_step.target is not None
+    assert execution_step.target.locators[0].value == "role:button;name:Add to cart"
+    assert artifact_step == execution_step
     assert param is None
 
 
 def test_type_decision_carries_the_value_to_type():
     decision = AgentDecision(reasoning="enter username", action="type", target_index=2, value="standard_user", done=False)
-    step, param = decision_to_step(decision, _observation(), step_id=1)
+    execution_step, artifact_step, param = decision_to_step(decision, _observation(), step_id=1)
 
-    assert step.action == "type"
-    assert step.value == "standard_user"
-    assert step.target.locators[0].value == "role:textbox"
+    assert execution_step.action == "type"
+    assert execution_step.value == "standard_user"
+    assert artifact_step.value == "standard_user"
     assert param is None
 
 
 def test_navigate_decision_has_no_target():
     decision = AgentDecision(reasoning="go to login", action="navigate", value="https://www.saucedemo.com/", done=False)
-    step, param = decision_to_step(decision, _observation(), step_id=1)
+    execution_step, artifact_step, param = decision_to_step(decision, _observation(), step_id=1)
 
-    assert step.action == "navigate"
-    assert step.target is None
-    assert step.value == "https://www.saucedemo.com/"
+    assert execution_step.action == "navigate"
+    assert execution_step.target is None
+    assert execution_step.value == "https://www.saucedemo.com/"
     assert param is None
 
 
@@ -95,10 +98,11 @@ def test_unrecognized_action_raises_rather_than_being_silently_ignored():
 
 def test_recorded_step_defaults_to_safe_risk_level():
     decision = AgentDecision(reasoning="click", action="click", target_index=1, done=False)
-    step, _ = decision_to_step(decision, _observation(), step_id=1)
+    execution_step, artifact_step, _ = decision_to_step(decision, _observation(), step_id=1)
 
     from capability_recorder.schema import RiskLevel
-    assert step.risk_level == RiskLevel.SAFE
+    assert execution_step.risk_level == RiskLevel.SAFE
+    assert artifact_step.risk_level == RiskLevel.SAFE
 
 
 def _observation_with_password_field() -> Observation:
@@ -124,18 +128,25 @@ def test_is_sensitive_field_detects_common_keywords():
     assert is_sensitive_field("Search") is False
 
 
-def test_typing_into_a_sensitive_field_redacts_the_literal_value():
+def test_execution_step_keeps_the_real_value_for_a_sensitive_field():
     decision = AgentDecision(reasoning="enter password", action="type", target_index=1, value="secret_sauce", done=False)
-    step, param = decision_to_step(decision, _observation_with_password_field(), step_id=1)
+    execution_step, artifact_step, param = decision_to_step(decision, _observation_with_password_field(), step_id=1)
 
-    assert step.value != "secret_sauce"
-    assert "secret_sauce" not in (step.value or "")
-    assert step.value == "{{password}}"
+    assert execution_step.value == "secret_sauce"
+
+
+def test_artifact_step_redacts_the_literal_value_for_a_sensitive_field():
+    decision = AgentDecision(reasoning="enter password", action="type", target_index=1, value="secret_sauce", done=False)
+    execution_step, artifact_step, param = decision_to_step(decision, _observation_with_password_field(), step_id=1)
+
+    assert artifact_step.value != "secret_sauce"
+    assert "secret_sauce" not in (artifact_step.value or "")
+    assert artifact_step.value == "{{password}}"
 
 
 def test_typing_into_a_sensitive_field_produces_a_matching_input_param():
     decision = AgentDecision(reasoning="enter password", action="type", target_index=1, value="secret_sauce", done=False)
-    step, param = decision_to_step(decision, _observation_with_password_field(), step_id=1)
+    execution_step, artifact_step, param = decision_to_step(decision, _observation_with_password_field(), step_id=1)
 
     assert param is not None
     assert param.name == "password"
@@ -143,9 +154,10 @@ def test_typing_into_a_sensitive_field_produces_a_matching_input_param():
     assert "secret_sauce" not in param.description
 
 
-def test_typing_into_a_non_sensitive_field_is_not_redacted():
+def test_typing_into_a_non_sensitive_field_is_not_redacted_in_either_step():
     decision = AgentDecision(reasoning="enter username", action="type", target_index=2, value="standard_user", done=False)
-    step, param = decision_to_step(decision, _observation(), step_id=1)
+    execution_step, artifact_step, param = decision_to_step(decision, _observation(), step_id=1)
 
-    assert step.value == "standard_user"
+    assert execution_step.value == "standard_user"
+    assert artifact_step.value == "standard_user"
     assert param is None
