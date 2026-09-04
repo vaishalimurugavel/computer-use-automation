@@ -219,14 +219,28 @@ here.
   written to disk at any point. This was a genuinely important fix: an
   earlier discovery run had stored a real password in plaintext in the
   saved artifact before this mechanism existed.
-- **Allowlist enforcement**: **not implemented.** The assignment
-  explicitly requires an allowlist of permitted domains/routes and action
-  types. This is a real gap, not a documented design choice — the
-  intended shape would be a simple check in `_execute_on_page` /
-  `PlaywrightStepExecutor.execute`, comparing `page.url()` against a
-  configured allowed-domain list and the step's `action` against an
-  allowed-action-types set, before executing — rejecting (as a
-  `HARD_FAILURE`, using the existing taxonomy) anything outside it.
+- **Allowlist enforcement**: implemented (`safety.py`). `check_allowlist()`
+  is a pure, testable policy check consulted by `replay_capability`
+  *before* risk gating and *before* execution — a step outside the
+  allowlist never reaches the executor at all. Two checks:
+  (1) **action type** — every step's `action` must be in the configured
+  `allowed_actions` list; (2) **domain** — for `NAVIGATE` steps
+  specifically, the target URL's domain (including subdomains) must be
+  in `allowed_domains`. A violation is treated as `HARD_FAILURE` and
+  routed through the existing escalation machinery, but — deliberately —
+  a policy violation still *can* be explicitly overridden by a human via
+  `escalate()` approval, same as any other hard failure; it is not a
+  silently-unbypassable hard stop, since the assignment frames escalation
+  as the mechanism for handling exactly this kind of exceptional case.
+  **Known scope limit**: only `NAVIGATE` steps are domain-checked, since
+  their target URL is known directly from `step.value`. `CLICK`/`TYPE`
+  steps don't carry a URL of their own, so verifying the *current* page's
+  domain for those would require the executor to report its current URL
+  — a natural extension, not implemented here. An `Allowlist` is also
+  optional on `replay_capability`; if none is supplied, no policy check
+  runs at all — a deliberate choice to be explicit about when policy
+  enforcement is and isn't active, rather than silently defaulting to
+  either fully permissive or fully restrictive behavior.
 
 ## Cuts
 
@@ -236,8 +250,12 @@ Specific, honest gaps, in priority order for what I'd build next:
    doesn't currently check `capability.success_condition` after the step
    loop; it reports `SUCCESS` purely because every step executed without
    error, not because the goal was independently confirmed reached.
-2. **Allowlist enforcement (3.4)** — explicitly required, not yet built;
-   see Safety above for the intended shape.
+2. **Domain checking for CLICK/TYPE steps** — allowlist enforcement
+   (action-type + domain checks) is implemented and tested for `NAVIGATE`
+   steps; extending domain verification to `CLICK`/`TYPE` steps would
+   require the `StepExecutor` protocol to expose the current page's URL,
+   which it doesn't today (`observe_current_state()` returns page text,
+   not a URL).
 3. **Output extraction** — `output_fields` is never populated by
    discovery or returned by replay; the `extract` action exists but its
    result isn't wired into the capability's declared outputs.
