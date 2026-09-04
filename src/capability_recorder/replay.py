@@ -25,8 +25,10 @@ from pydantic import BaseModel
 
 from capability_recorder.recovery import find_matching_recovery_rule
 from capability_recorder.schema import (
+    ActionType,
     BusinessOutcomeType,
     Capability,
+    LocatorStrategy,
     RiskLevel,
     Step,
 )
@@ -142,6 +144,23 @@ def _resolve_step_value(step: Step, input_values: dict[str, str]) -> Step:
     return step.model_copy(update={"value": input_values[param_name]})
 
 
+def _success_condition_met(capability: Capability, observed_state: str) -> bool:
+    """Check the capability's success_condition against the final page
+    state, once all steps have executed. Currently only TEXT_CONTENT
+    locator strategies are checkable against a plain-text observed_state
+    (the same format used for business-outcome and recovery-rule
+    matching elsewhere in this module). Other strategies (accessibility
+    role, CSS selector) aren't verifiable from text alone -- treated
+    conservatively as "cannot verify, assume not met" rather than
+    silently passing, consistent with the project-wide 'never guess'
+    principle.
+    """
+    locator = capability.success_condition.check.locators[0]
+    if locator.strategy == LocatorStrategy.TEXT_CONTENT:
+        return locator.value.lower() in observed_state.lower()
+    return False
+
+
 def replay_capability(
     capability: Capability,
     executor: StepExecutor,
@@ -207,15 +226,64 @@ def replay_capability(
                 )
             continue
 
+    # All steps executed without a stopping failure -- but that only means
+    # each individual action completed. Verify the actual goal was reached
+    # by checking success_condition against the final observed state,
+    # rather than assuming success purely because nothing errored.
+    final_state = executor.observe_current_state()
+    if _success_condition_met(capability, final_state):
+        return ReplayResult(
+            capability_id=capability.capability_id,
+            final_category=OutcomeCategory.SUCCESS,
+            step_outcomes=step_outcomes,
+            detail="All steps completed successfully and success_condition was verified.",
+        )
+
+    # Steps completed, but the declared success_condition was NOT
+    # observed -- this is a real discrepancy worth escalating, not a
+    # silent pass. E.g. every click/type succeeded, but the expected
+    # confirmation text never appeared.
+    verification_step = Step(
+        step_id=capability.steps[-1].step_id + 1 if capability.steps else 1,
+        action=ActionType.EXTRACT,
+    )
+    verification_outcome = StepOutcome(
+        step_id=verification_step.step_id,
+        category=OutcomeCategory.HARD_FAILURE,
+        detail=f"success_condition not verified: {capability.success_condition.description}",
+    )
+    step_outcomes.append(verification_outcome)
+
+    approved = escalation_handler.escalate(
+        verification_step,
+        reason="all steps executed, but the declared success_condition could not be verified against the final page state",
+    )
+    if not approved:
+        return ReplayResult(
+            capability_id=capability.capability_id,
+            final_category=OutcomeCategory.HARD_FAILURE,
+            step_outcomes=step_outcomes,
+            detail=verification_outcome.detail,
+        )
+
+    # A human reviewed the discrepancy and confirmed it's fine (e.g. the
+    # confirmation text changed wording since recording) -- proceed as
+    # success, but the fact that this required human confirmation is
+    # preserved in step_outcomes for anyone reviewing the run later.
     return ReplayResult(
         capability_id=capability.capability_id,
         final_category=OutcomeCategory.SUCCESS,
         step_outcomes=step_outcomes,
-        detail="All steps completed successfully.",
+        detail="All steps completed; success_condition mismatch was reviewed and approved by a human.",
     )
 
 
 def _classify_outcome(step: Step, result: ExecutionResult, capability: Capability) -> StepOutcome:
+    """Decide which of the four outcome categories this step's execution
+    falls into. Order of checks matters: business outcomes are checked
+    before generic recovery, since a pre-registered business outcome is a
+    more specific, more confident match than a generic recovery trigger.
+    """
     if result.succeeded:
         return StepOutcome(
             step_id=step.step_id,

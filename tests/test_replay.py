@@ -31,17 +31,26 @@ from capability_recorder.schema import (
 
 
 class FakeStepExecutor:
-    def __init__(self, results_by_step_id: dict[int, ExecutionResult]):
+    """Scripted executor: returns a pre-programmed ExecutionResult per
+    step_id, in the order provided. Lets each test control exactly what
+    "happens" at each step without any real browser interaction."""
+
+    def __init__(self, results_by_step_id: dict[int, ExecutionResult], final_state: str = "ok"):
         self._results = results_by_step_id
+        self._final_state = final_state
 
     def execute(self, step: Step) -> ExecutionResult:
         return self._results[step.step_id]
 
     def observe_current_state(self) -> str:
-        return ""
+        return self._final_state
 
 
 class FakeEscalationHandler:
+    """Records every escalation call it receives and returns a
+    pre-configured approval decision, so tests can assert both that
+    escalation was triggered AND how many times."""
+
     def __init__(self, approve: bool = True):
         self.approve = approve
         self.calls: list[tuple[int, str]] = []
@@ -61,6 +70,7 @@ def _success_condition() -> SuccessCondition:
 
 
 def _capability(steps: list[Step], **kwargs) -> Capability:
+    kwargs.setdefault("success_condition", _success_condition())
     return Capability(
         capability_id="cap-test",
         name="test_capability",
@@ -68,10 +78,8 @@ def _capability(steps: list[Step], **kwargs) -> Capability:
         target_app="test_app",
         description="test",
         steps=steps,
-        success_condition=_success_condition(),
         **kwargs,
     )
-
 
 def test_all_steps_succeed_returns_success():
     cap = _capability([
@@ -221,10 +229,6 @@ def test_hard_failure_resolved_by_human_allows_replay_to_continue():
     assert len(result.step_outcomes) == 2
 
 
-# ---------------------------------------------------------------------------
-# Redacted-parameter substitution at replay time
-# ---------------------------------------------------------------------------
-
 def test_placeholder_value_is_substituted_with_supplied_input_value():
     cap = _capability([
         Step(step_id=1, action=ActionType.TYPE, value="{{password}}"),
@@ -266,3 +270,74 @@ def test_non_placeholder_values_are_passed_through_unchanged():
     result = replay_capability(cap, executor, escalation, input_values={})
 
     assert result.final_category == OutcomeCategory.SUCCESS
+
+
+def test_success_condition_met_reports_success_with_no_escalation():
+    cap = _capability([
+        Step(step_id=1, action=ActionType.CLICK),
+    ])
+    executor = FakeStepExecutor(
+        {1: ExecutionResult(succeeded=True, observed_state="clicked")},
+        final_state="Your order is ok and confirmed",
+    )
+    escalation = FakeEscalationHandler()
+
+    result = replay_capability(cap, executor, escalation)
+
+    assert result.final_category == OutcomeCategory.SUCCESS
+    assert escalation.calls == []
+
+
+def test_success_condition_not_met_escalates_and_reports_hard_failure_if_denied():
+    cap = _capability([
+        Step(step_id=1, action=ActionType.CLICK),
+    ])
+    executor = FakeStepExecutor(
+        {1: ExecutionResult(succeeded=True, observed_state="clicked")},
+        final_state="Something completely different, no match here",
+    )
+    escalation = FakeEscalationHandler(approve=False)
+
+    result = replay_capability(cap, executor, escalation)
+
+    assert result.final_category == OutcomeCategory.HARD_FAILURE
+    assert len(escalation.calls) == 1
+    assert "success_condition" in escalation.calls[0][1]  # underscore, matching replay.py's actual wording
+
+
+def test_success_condition_not_met_but_human_approves_still_reports_success():
+    cap = _capability([
+        Step(step_id=1, action=ActionType.CLICK),
+    ])
+    executor = FakeStepExecutor(
+        {1: ExecutionResult(succeeded=True, observed_state="clicked")},
+        final_state="Different wording entirely",
+    )
+    escalation = FakeEscalationHandler(approve=True)
+
+    result = replay_capability(cap, executor, escalation)
+
+    assert result.final_category == OutcomeCategory.SUCCESS
+    assert any(o.category == OutcomeCategory.HARD_FAILURE for o in result.step_outcomes)
+
+
+def test_non_text_content_success_condition_is_treated_as_unverifiable():
+    cap = _capability(
+        [Step(step_id=1, action=ActionType.CLICK)],
+        success_condition=SuccessCondition(
+            description="role-based check",
+            check=ElementTarget(
+                description="dummy",
+                locators=[Locator(strategy=LocatorStrategy.ACCESSIBILITY_ROLE, value="role:button;name:Confirmed", confidence=0.9)],
+            ),
+        ),
+    )
+    executor = FakeStepExecutor(
+        {1: ExecutionResult(succeeded=True, observed_state="clicked")},
+        final_state="anything at all",
+    )
+    escalation = FakeEscalationHandler(approve=False)
+
+    result = replay_capability(cap, executor, escalation)
+
+    assert result.final_category == OutcomeCategory.HARD_FAILURE
