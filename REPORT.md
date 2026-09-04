@@ -118,6 +118,22 @@ state never defaults to a guessed success** — it defaults to
   `capability.success_condition` after the step loop completes, and does
   not populate/return `output_fields` to the caller. Both are defined in
   the schema and are the highest-priority next steps — see Cuts.
+- **A real HARD_FAILURE, observed in practice (not staged):** a replay run
+against the discovered capability hit exactly this case. SauceDemo's
+"Add to cart" button relabels itself to "Remove" once the item is
+already in the cart — so a locator recorded from a fresh cart state
+timed out (`Locator.click: Timeout 30000ms exceeded`) when replayed
+against a cart state that already contained the item from a prior run.
+The system correctly classified this as `HARD_FAILURE` (nothing in
+`expected_business_outcomes` or the recovery rules matched "Timeout
+30000ms exceeded"), escalated to a human with a clear reason
+("unrecoverable failure"), and — once approved — continued to the
+remaining step rather than aborting the whole run outright. See
+`evidence/replay_error_run.log` for the full output. This is a good
+illustration of why replay treats state-dependent preconditions as
+something that can legitimately drift between recording and replay, and
+handles it via escalation rather than assuming the recorded path is
+always valid.
 
 ## Heterogeneity & multi-tenant
 
