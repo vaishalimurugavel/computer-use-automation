@@ -2,12 +2,14 @@
 Human escalation handlers, implementing the EscalationHandler protocol
 (see replay.py): escalate(step, reason) -> bool.
 
-Two implementations:
+Three implementations:
 - ConsoleEscalationHandler: a real, interactive handler -- prints the
   step's details and the reason it was escalated, then prompts a human
-  for approval. This is the "real" implementation for a CLI-driven demo,
-  in the same spirit as PlaywrightStepExecutor being the real
-  implementation of StepExecutor.
+  for a simple approve/deny decision. Good for a quick CLI demo.
+- LiveSessionEscalationHandler: the fuller model the assignment
+  describes -- lets a human take over the SAME live browser session the
+  automation was using, act manually if needed, then hand control back.
+  See its own docstring for the mechanism.
 - NullEscalationHandler: a fail-safe default that always denies, with no
   interaction at all. Intended for headless/automated contexts where no
   human is available to ask -- denying by default is consistent with the
@@ -50,6 +52,51 @@ class ConsoleEscalationHandler:
 
         print("Approved -- continuing." if approved else "Denied -- stopping.")
         return approved
+
+
+class LiveSessionEscalationHandler:
+    """Lets a human take over the SAME live browser session the
+    automation was using, act manually if needed, then hand control back
+    -- rather than a plain approve/deny prompt. This is the fuller model
+    the assignment describes for escalation & handoff (see REPORT.md).
+
+    Mechanism: since this handler is constructed with a reference to the
+    same live `page` object the StepExecutor is driving, the human can
+    literally interact with that exact, already-open, already-
+    authenticated browser window while replay is paused at input().
+    There is no new session, no re-login, no lost state -- the human is
+    acting in the same context the automation was just in.
+
+    `page` only needs a `.url` property for this handler to report where
+    things stand; it's typed loosely (not as playwright.sync_api.Page)
+    so this can be unit tested with a simple fake object.
+    """
+
+    def __init__(self, page, input_func: Callable[[str], str] = input):
+        self._page = page
+        self._input = input_func
+
+    def escalate(self, step: Step, reason: str) -> bool:
+        print("\n" + "=" * 60)
+        print("HUMAN HANDOFF -- LIVE SESSION")
+        print("=" * 60)
+        print(f"Step {step.step_id}: {step.action}")
+        if step.target is not None:
+            print(f"Target: {step.target.description}")
+        print(f"Reason for escalation: {reason}")
+        print(f"Current page: {self._page.url}")
+        print("-" * 60)
+        print("The browser window is still open and live.")
+        print("You may interact with it directly right now if needed.")
+        print("-" * 60)
+
+        response = self._input(
+            "Press Enter once ready to resume replay on this session, or type 'n' to abort: "
+        ).strip().lower()
+        resume = response not in ("n", "no")
+
+        print("Resuming replay on the same session." if resume else "Aborting replay.")
+        return resume
 
 
 class NullEscalationHandler:

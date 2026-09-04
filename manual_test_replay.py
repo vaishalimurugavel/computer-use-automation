@@ -14,7 +14,7 @@ by manual_test_discovery.py there first).
 import json
 
 from playwright.sync_api import sync_playwright
-
+from capability_recorder.escalation import LiveSessionEscalationHandler
 from capability_recorder.executor import PlaywrightStepExecutor
 from capability_recorder.replay import OutcomeCategory, replay_capability
 from capability_recorder.schema import Capability
@@ -41,7 +41,8 @@ def main():
         page.goto("https://www.saucedemo.com/")
 
         executor = PlaywrightStepExecutor(page)
-        escalation = AutoApproveEscalationHandler()
+        #escalation = AutoApproveEscalationHandler()
+        escalation = LiveSessionEscalationHandler(page=page)
 
         result = replay_capability(capability, executor, escalation)
 

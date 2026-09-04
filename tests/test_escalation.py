@@ -5,8 +5,7 @@ ConsoleEscalationHandler is tested by injecting a fake input function
 (rather than mocking the built-in input() directly) -- this exercises
 the real approval logic without needing actual console interaction.
 """
-
-from capability_recorder.escalation import ConsoleEscalationHandler, NullEscalationHandler
+from capability_recorder.escalation import ConsoleEscalationHandler, LiveSessionEscalationHandler, NullEscalationHandler
 from capability_recorder.schema import ActionType, ElementTarget, Locator, LocatorStrategy, Step
 
 
@@ -65,3 +64,34 @@ def test_null_handler_always_denies_without_prompting():
     handler = NullEscalationHandler()
     result = handler.escalate(_step(), reason="anything at all")
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# LiveSessionEscalationHandler
+# ---------------------------------------------------------------------------
+
+class _FakePage:
+    """Minimal fake -- LiveSessionEscalationHandler only needs .url."""
+    def __init__(self, url: str):
+        self.url = url
+
+
+def test_live_session_handler_resumes_on_empty_input():
+    handler = LiveSessionEscalationHandler(page=_FakePage("https://www.saucedemo.com/cart.html"), input_func=lambda prompt: "")
+    result = handler.escalate(_step(), reason="unrecoverable failure")
+    assert result is True
+
+
+def test_live_session_handler_aborts_on_n():
+    handler = LiveSessionEscalationHandler(page=_FakePage("https://www.saucedemo.com/cart.html"), input_func=lambda prompt: "n")
+    result = handler.escalate(_step(), reason="unrecoverable failure")
+    assert result is False
+
+
+def test_live_session_handler_prints_current_page_url(capsys):
+    handler = LiveSessionEscalationHandler(page=_FakePage("https://www.saucedemo.com/checkout-step-one.html"), input_func=lambda prompt: "")
+    handler.escalate(_step(), reason="unrecoverable failure")
+
+    captured = capsys.readouterr()
+    assert "https://www.saucedemo.com/checkout-step-one.html" in captured.out
+    assert "still open and live" in captured.out
