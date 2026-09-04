@@ -24,6 +24,7 @@ from typing import Optional, Protocol
 from pydantic import BaseModel
 
 from capability_recorder.recovery import find_matching_recovery_rule
+from capability_recorder.safety import Allowlist, check_allowlist
 from capability_recorder.schema import (
     ActionType,
     BusinessOutcomeType,
@@ -166,12 +167,39 @@ def replay_capability(
     executor: StepExecutor,
     escalation_handler: EscalationHandler,
     input_values: dict[str, str] | None = None,
+    allowlist: Allowlist | None = None,
 ) -> ReplayResult:
     input_values = input_values or {}
     step_outcomes: list[StepOutcome] = []
 
     for step in capability.steps:
         step = _resolve_step_value(step, input_values)
+
+        # 0. Allowlist enforcement -- checked BEFORE risk gating and
+        # BEFORE execution. A step outside the allowlist never even
+        # reaches the executor; this is a hard policy boundary, not a
+        # judgment call a human can casually wave through the way a risky
+        # action's escalation can be approved. Still routed through the
+        # existing HARD_FAILURE + escalation machinery for consistency,
+        # rather than introducing a fifth outcome category.
+        if allowlist is not None:
+            violation = check_allowlist(step, allowlist)
+            if violation is not None:
+                outcome = StepOutcome(
+                    step_id=step.step_id,
+                    category=OutcomeCategory.HARD_FAILURE,
+                    detail=f"Allowlist violation: {violation}",
+                )
+                step_outcomes.append(outcome)
+                approved = escalation_handler.escalate(step, reason=f"allowlist violation: {violation}")
+                if not approved:
+                    return ReplayResult(
+                        capability_id=capability.capability_id,
+                        final_category=OutcomeCategory.HARD_FAILURE,
+                        step_outcomes=step_outcomes,
+                        detail=outcome.detail,
+                    )
+                continue  # human explicitly overrode the policy violation
 
         # 1. Risk gating -- checked BEFORE execution, independent of success/failure.
         if step.risk_level == RiskLevel.RISKY:

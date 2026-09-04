@@ -341,3 +341,80 @@ def test_non_text_content_success_condition_is_treated_as_unverifiable():
     result = replay_capability(cap, executor, escalation)
 
     assert result.final_category == OutcomeCategory.HARD_FAILURE
+
+
+# ---------------------------------------------------------------------------
+# Allowlist enforcement (real gap fix)
+# ---------------------------------------------------------------------------
+
+def test_step_within_allowlist_executes_normally():
+    from capability_recorder.safety import Allowlist
+
+    cap = _capability([
+        Step(step_id=1, action=ActionType.NAVIGATE, value="https://www.saucedemo.com/"),
+    ])
+    executor = FakeStepExecutor({
+        1: ExecutionResult(succeeded=True, observed_state="ok"),
+    })
+    escalation = FakeEscalationHandler()
+    allowlist = Allowlist(allowed_domains=["saucedemo.com"])
+
+    result = replay_capability(cap, executor, escalation, allowlist=allowlist)
+
+    assert result.final_category == OutcomeCategory.SUCCESS
+    assert escalation.calls == []
+
+
+def test_navigation_outside_allowlist_is_blocked_before_execution():
+    from capability_recorder.safety import Allowlist
+
+    cap = _capability([
+        Step(step_id=1, action=ActionType.NAVIGATE, value="https://evil-example.com/"),
+        Step(step_id=2, action=ActionType.CLICK),
+    ])
+    executor = FakeStepExecutor({
+        1: ExecutionResult(succeeded=True, observed_state="should never be seen -- execute() should not be called"),
+        2: ExecutionResult(succeeded=True, observed_state="should never be reached"),
+    })
+    escalation = FakeEscalationHandler(approve=False)
+    allowlist = Allowlist(allowed_domains=["saucedemo.com"])
+
+    result = replay_capability(cap, executor, escalation, allowlist=allowlist)
+
+    assert result.final_category == OutcomeCategory.HARD_FAILURE
+    assert "Allowlist violation" in result.step_outcomes[0].detail
+    assert len(result.step_outcomes) == 1
+
+
+def test_allowlist_violation_can_be_overridden_by_explicit_human_approval():
+    from capability_recorder.safety import Allowlist
+
+    cap = _capability([
+        Step(step_id=1, action=ActionType.NAVIGATE, value="https://evil-example.com/"),
+    ])
+    executor = FakeStepExecutor({
+        1: ExecutionResult(succeeded=True, observed_state="ok"),
+    })
+    escalation = FakeEscalationHandler(approve=True)
+    allowlist = Allowlist(allowed_domains=["saucedemo.com"])
+
+    result = replay_capability(cap, executor, escalation, allowlist=allowlist)
+
+    assert len(escalation.calls) == 1
+    assert "allowlist violation" in escalation.calls[0][1]
+    assert result.final_category == OutcomeCategory.SUCCESS
+
+
+def test_no_allowlist_supplied_means_no_policy_check_at_all():
+    cap = _capability([
+        Step(step_id=1, action=ActionType.NAVIGATE, value="https://anything-at-all.com/"),
+    ])
+    executor = FakeStepExecutor({
+        1: ExecutionResult(succeeded=True, observed_state="ok"),
+    })
+    escalation = FakeEscalationHandler()
+
+    result = replay_capability(cap, executor, escalation, allowlist=None)
+
+    assert result.final_category == OutcomeCategory.SUCCESS
+    assert escalation.calls == []
